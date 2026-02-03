@@ -227,9 +227,69 @@ def load_data():
         'columns': ['Cycle 1', 'Cycle 2']
     }
 
+def save_to_google_sheets(data, sheet_identifier):
+    """Save data back to Google Sheets"""
+    try:
+        # Define the scope
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        
+        # Load credentials from secrets
+        if 'gcp_service_account' not in st.secrets:
+            st.error("Google Sheets credentials not found in secrets.toml")
+            return False
+        
+        creds_dict = dict(st.secrets['gcp_service_account'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        # Open the spreadsheet
+        if 'docs.google.com/spreadsheets' in sheet_identifier:
+            import re
+            match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheet_identifier)
+            if match:
+                sheet = client.open_by_key(match.group(1)).sheet1
+            else:
+                st.error("Invalid Google Sheets URL format")
+                return False
+        elif len(sheet_identifier) > 30 and '-' in sheet_identifier:
+            sheet = client.open_by_key(sheet_identifier).sheet1
+        else:
+            sheet = client.open(sheet_identifier).sheet1
+        
+        # Prepare data for writing
+        headers = ['Name'] + data['columns']
+        rows = [headers]
+        
+        for person in data['people']:
+            row = [person['Name']]
+            for col in data['columns']:
+                value = 'TRUE' if person.get(col, False) else 'FALSE'
+                row.append(value)
+            rows.append(row)
+        
+        # Clear and update the sheet
+        sheet.clear()
+        sheet.update('A1', rows)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error saving to Google Sheets: {str(e)}")
+        return False
+
 def save_data(data):
+    """Save data to the appropriate destination"""
+    # Always save to JSON as backup
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=2)
+    
+    # If using Google Sheets, also save there
+    if 'custom_data_source' in st.session_state:
+        source_type = st.session_state.custom_data_source.get('type')
+        if source_type == 'google_sheets' and 'sheet_name' in st.session_state.custom_data_source:
+            save_to_google_sheets(data, st.session_state.custom_data_source['sheet_name'])
+    elif DATA_SOURCE_TYPE == 'google_sheets' and GOOGLE_SHEET_NAME:
+        save_to_google_sheets(data, GOOGLE_SHEET_NAME)
 
 def update_status(running=True):
     with open(STATUS_FILE, 'w') as f:
@@ -454,17 +514,128 @@ if is_mini_app:
     # ==================== MINI APP MODE ====================
     st.markdown("""
     <style>
+        /* Hide Streamlit UI elements */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
         .stDeployButton {display: none;}
+        
+        /* Telegram Web App styling */
+        .stApp {
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+        
+        /* Compact layout */
+        .block-container {
+            padding: 1rem 1rem !important;
+            max-width: 100% !important;
+        }
+        
+        /* Title styling */
+        h1 {
+            font-size: 22px !important;
+            text-align: center;
+            margin-bottom: 12px !important;
+            font-weight: 600;
+        }
+        
+        /* Info box styling */
+        .stAlert {
+            padding: 12px !important;
+            border-radius: 8px !important;
+            font-size: 14px !important;
+            margin-bottom: 12px !important;
+        }
+        
+        /* Button styling */
+        .stButton button {
+            border-radius: 8px !important;
+            font-size: 13px !important;
+            font-weight: 500 !important;
+            padding: 10px 14px !important;
+            width: 100%;
+            transition: all 0.2s;
+        }
+        
+        .stButton button:active {
+            transform: scale(0.98);
+            opacity: 0.8;
+        }
+        
+        /* Primary button (Save) */
+        .stButton button[kind="primary"] {
+            background-color: #4caf50 !important;
+        }
+        
+        /* Checkbox styling */
+        .stCheckbox {
+            margin: 0 !important;
+        }
+        
+        .stCheckbox > label {
+            font-size: 18px !important;
+            padding: 4px !important;
+        }
+        
+        /* Table-like layout */
+        div[data-testid="column"] {
+            background-color: white;
+            padding: 10px 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        /* Name column */
+        div[data-testid="column"]:first-child {
+            font-weight: 500;
+        }
+        
+        /* Compact spacing */
+        .element-container {
+            margin-bottom: 0 !important;
+        }
+        
+        /* Horizontal rule */
+        hr {
+            margin: 0 !important;
+            border-color: #e0e0e0 !important;
+        }
+        
+        /* Form styling */
+        .stForm {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* Text input */
+        .stTextInput input {
+            border-radius: 8px !important;
+            font-size: 14px !important;
+        }
+        
+        /* Markdown headers */
+        h3 {
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            margin: 0 !important;
+            padding: 8px 0 !important;
+        }
+        
+        /* Subheader in forms */
+        .stForm h2 {
+            font-size: 18px !important;
+            font-weight: 600 !important;
+            margin-bottom: 16px !important;
+        }
     </style>
     """, unsafe_allow_html=True)
     
     st.title("🙏 Prayer Cycle Tracker")
     
-    # Initialize session state
-    if 'data' not in st.session_state:
+    # Initialize session state and force reload from Google Sheets
+    if 'data' not in st.session_state or DATA_SOURCE_TYPE == 'google_sheets':
         st.session_state.data = load_data()
     
     # Auto-check and add new cycle if needed
@@ -569,8 +740,8 @@ if is_mini_app:
 else:
     # ==================== NORMAL MODE (Control Panel) ====================
     
-    # Initialize session state
-    if 'data' not in st.session_state:
+    # Initialize session state and force reload from Google Sheets
+    if 'data' not in st.session_state or DATA_SOURCE_TYPE == 'google_sheets':
         st.session_state.data = load_data()
     if 'bot_thread' not in st.session_state:
         st.session_state.bot_thread = None
