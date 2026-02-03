@@ -3,3 +3,6 @@ python-telegram-bot
 python-dotenv
 pandas
 flask
+openpyxl
+gspread
+oauth2client

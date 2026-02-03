@@ -7,7 +7,10 @@ import pandas as pd
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 import threading
-from flask import Flask, jsonify, request, send_file  # ADD THIS LINE
+from flask import Flask, jsonify, request, send_file
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from io import BytesIO
 
 st.set_page_config(page_title="Prayer List Bot - All in One", page_icon="🙏", layout="wide")
 
@@ -17,23 +20,142 @@ try:
     DATA_FILE = st.secrets.get("DATA_FILE", "prayer_list_data.json")
     STATUS_FILE = st.secrets.get("STATUS_FILE", "bot_status.json")
     MINI_APP_URL = st.secrets.get("MINI_APP_URL", "http://localhost:8501")
+    DATA_SOURCE_TYPE = st.secrets.get("DATA_SOURCE_TYPE", "json")  # json, excel, or google_sheets
+    GOOGLE_SHEET_NAME = st.secrets.get("GOOGLE_SHEET_NAME", "")
 except FileNotFoundError:
     st.error("⚠️ Secrets file not found! Please create `.streamlit/secrets.toml`")
     BOT_TOKEN = ""
     DATA_FILE = "prayer_list_data.json"
     STATUS_FILE = "bot_status.json"
     MINI_APP_URL = "http://localhost:8501"
+    DATA_SOURCE_TYPE = "json"
+    GOOGLE_SHEET_NAME = ""
 
 # ==================== DATA FUNCTIONS ====================
 
+def load_excel_data(file_path_or_buffer):
+    """Load data from Excel file"""
+    try:
+        df = pd.read_excel(file_path_or_buffer, engine='openpyxl')
+        
+        # First column should be 'Name'
+        if 'Name' not in df.columns:
+            st.error("Excel file must have a 'Name' column")
+            return None
+        
+        # Get cycle columns (all columns except 'Name')
+        cycle_columns = [col for col in df.columns if col != 'Name']
+        
+        # Convert DataFrame to the expected format
+        people = []
+        for _, row in df.iterrows():
+            person = {'Name': str(row['Name'])}
+            for col in cycle_columns:
+                # Convert to boolean (TRUE/FALSE or 1/0 or Yes/No)
+                val = row[col]
+                if isinstance(val, str):
+                    person[col] = val.upper() in ['TRUE', 'YES', '1']
+                else:
+                    person[col] = bool(val)
+            people.append(person)
+        
+        return {
+            'people': people,
+            'columns': cycle_columns
+        }
+    except Exception as e:
+        st.error(f"Error loading Excel data: {str(e)}")
+        return None
+
+def load_google_sheets_data(sheet_name):
+    """Load data from Google Sheets"""
+    try:
+        # Define the scope
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        
+        # Load credentials from secrets
+        if 'gcp_service_account' not in st.secrets:
+            st.error("Google Sheets credentials not found in secrets.toml")
+            return None
+        
+        creds_dict = dict(st.secrets['gcp_service_account'])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        # Open the spreadsheet
+        sheet = client.open(sheet_name).sheet1
+        
+        # Get all values
+        data = sheet.get_all_records()
+        
+        if not data:
+            return None
+        
+        # Get column names (first row is header)
+        columns = list(data[0].keys())
+        
+        if 'Name' not in columns:
+            st.error("Google Sheet must have a 'Name' column")
+            return None
+        
+        cycle_columns = [col for col in columns if col != 'Name']
+        
+        # Convert to the expected format
+        people = []
+        for row in data:
+            person = {'Name': str(row['Name'])}
+            for col in cycle_columns:
+                val = row[col]
+                if isinstance(val, str):
+                    person[col] = val.upper() in ['TRUE', 'YES', '1']
+                else:
+                    person[col] = bool(val)
+            people.append(person)
+        
+        return {
+            'people': people,
+            'columns': cycle_columns
+        }
+    except Exception as e:
+        st.error(f"Error loading Google Sheets data: {str(e)}")
+        return None
+
 def load_data():
+    """Load data from configured source (JSON, Excel, or Google Sheets)"""
+    # Check if we have a custom data source in session state
+    if 'custom_data_source' in st.session_state:
+        source_type = st.session_state.custom_data_source['type']
+        
+        if source_type == 'excel' and 'file' in st.session_state.custom_data_source:
+            data = load_excel_data(st.session_state.custom_data_source['file'])
+            if data:
+                return data
+        elif source_type == 'google_sheets' and 'sheet_name' in st.session_state.custom_data_source:
+            data = load_google_sheets_data(st.session_state.custom_data_source['sheet_name'])
+            if data:
+                return data
+    
+    # Use configured data source from secrets
+    if DATA_SOURCE_TYPE == 'excel' and os.path.exists(DATA_FILE):
+        data = load_excel_data(DATA_FILE)
+        if data:
+            return data
+    elif DATA_SOURCE_TYPE == 'google_sheets' and GOOGLE_SHEET_NAME:
+        data = load_google_sheets_data(GOOGLE_SHEET_NAME)
+        if data:
+            return data
+    
+    # Fall back to JSON
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
             return json.load(f)
+    
+    # Default data
     return {
         'people': [
-            {'Name': 'Abel K. George', 'Cycle 1': True, 'Cycle 2': False},
-            {'Name': 'Abey K. George', 'Cycle 1': True, 'Cycle 2': False},
+            {'Name': 'Name 1', 'Cycle 1': True, 'Cycle 2': False},
+            {'Name': 'Name 2', 'Cycle 1': True, 'Cycle 2': False},
         ],
         'columns': ['Cycle 1', 'Cycle 2']
     }
@@ -434,6 +556,61 @@ else:
         
         st.info(f"**Mini App URL:**\n{MINI_APP_URL}?mode=miniapp")
         
+        st.markdown("---")
+        st.subheader("📊 Data Source")
+        
+        data_source = st.selectbox(
+            "Select Data Source",
+            ["JSON File", "Excel File", "Google Sheets"],
+            index=0 if DATA_SOURCE_TYPE == 'json' else (1 if DATA_SOURCE_TYPE == 'excel' else 2)
+        )
+        
+        if data_source == "Excel File":
+            uploaded_file = st.file_uploader("Upload Excel File", type=['xlsx', 'xls'])
+            if uploaded_file:
+                st.session_state.custom_data_source = {
+                    'type': 'excel',
+                    'file': BytesIO(uploaded_file.read())
+                }
+                st.success("✅ Excel file loaded!")
+                if st.button("🔄 Reload Data"):
+                    st.session_state.data = load_data()
+                    st.rerun()
+            st.info("📝 Excel format: First column 'Name', then cycle columns (Cycle 1, Cycle 2, etc.)")
+        
+        elif data_source == "Google Sheets":
+            sheet_name = st.text_input("Google Sheet Name", value=GOOGLE_SHEET_NAME)
+            if st.button("🔗 Connect to Sheet"):
+                if sheet_name:
+                    st.session_state.custom_data_source = {
+                        'type': 'google_sheets',
+                        'sheet_name': sheet_name
+                    }
+                    st.session_state.data = load_data()
+                    st.rerun()
+            st.info("📝 Sheet format: First column 'Name', then cycle columns")
+            with st.expander("Setup Google Sheets"):
+                st.markdown("""
+                1. Create a Google Cloud project
+                2. Enable Google Sheets API
+                3. Create service account credentials
+                4. Add credentials to secrets.toml:
+                ```toml
+                [gcp_service_account]
+                type = "service_account"
+                project_id = "your-project"
+                private_key_id = "key-id"
+                private_key = "-----BEGIN PRIVATE KEY-----\\n..."
+                client_email = "service@project.iam.gserviceaccount.com"
+                client_id = "123456789"
+                ```
+                5. Share your Google Sheet with the service account email
+                """)
+        else:
+            if 'custom_data_source' in st.session_state:
+                del st.session_state.custom_data_source
+            st.info(f"Using JSON file: {DATA_FILE}")
+        
         with st.expander("📝 Setup Instructions"):
             st.markdown(f"""
             **Create `.streamlit/secrets.toml`:**
@@ -638,8 +815,8 @@ else:
         **Example:**
 ```
         Name              Cycle 1    Cycle 2    Cycle 3
-        Abel K. George    TRUE       TRUE       FALSE
-        Abey K. George    TRUE       FALSE      FALSE
+        Name 1            TRUE       TRUE       FALSE
+        Name 2            TRUE       FALSE      FALSE
 ```
         
         When all people in Cycle 2 are TRUE, Cycle 3 will be added automatically!
