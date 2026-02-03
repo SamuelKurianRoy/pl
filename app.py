@@ -7,7 +7,6 @@ import pandas as pd
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 import threading
-from flask import Flask, jsonify, request, send_file
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from io import BytesIO
@@ -36,6 +35,10 @@ except FileNotFoundError:
 def load_excel_data(file_path_or_buffer):
     """Load data from Excel file"""
     try:
+        # Reset buffer position if it's a BytesIO object
+        if isinstance(file_path_or_buffer, BytesIO):
+            file_path_or_buffer.seek(0)
+        
         df = pd.read_excel(file_path_or_buffer, engine='openpyxl')
         
         # First column should be 'Name'
@@ -100,32 +103,82 @@ def load_google_sheets_data(sheet_identifier):
             # Assume it's a sheet name
             sheet = client.open(sheet_identifier).sheet1
         
-        # Get all values
-        data = sheet.get_all_records()
+        # Get all values as raw data (to handle duplicate/empty headers)
+        all_values = sheet.get_all_values()
         
-        if not data:
+        if not all_values or len(all_values) < 2:
+            st.error("Google Sheet is empty or has no data rows")
             return None
         
-        # Get column names (first row is header)
-        columns = list(data[0].keys())
+        # First row is headers
+        headers = all_values[0]
+        data_rows = all_values[1:]
         
-        if 'Name' not in columns:
+        # Clean headers and handle duplicates intelligently
+        header_map = {}  # {header_name: [list of (col_idx, sample_values)]}
+        
+        for idx, header in enumerate(headers):
+            header = str(header).strip()
+            if not header:  # Skip empty headers
+                continue
+            
+            # Collect sample values from first few rows for this column
+            sample_values = [row[idx] if idx < len(row) else '' for row in data_rows[:5]]
+            
+            if header not in header_map:
+                header_map[header] = []
+            header_map[header].append((idx, sample_values))
+        
+        # For duplicates, pick the best column (one with TRUE/FALSE or first one)
+        final_headers = []
+        
+        for header_name, candidates in header_map.items():
+            if len(candidates) == 1:
+                # No duplicate, just use it
+                final_headers.append((candidates[0][0], header_name))
+            else:
+                # Multiple columns with same name - pick the one with TRUE/FALSE values
+                best_idx = candidates[0][0]  # Default to first
+                
+                for col_idx, sample_vals in candidates:
+                    # Check if this column has TRUE/FALSE-like values
+                    has_bool_values = any(
+                        str(val).strip().upper() in ['TRUE', 'FALSE', 'YES', 'NO', '1', '0']
+                        for val in sample_vals if val
+                    )
+                    if has_bool_values:
+                        best_idx = col_idx
+                        break
+                
+                final_headers.append((best_idx, header_name))
+        
+        # Check if 'Name' column exists
+        if not any(h[1] == 'Name' for h in final_headers):
             st.error("Google Sheet must have a 'Name' column")
             return None
         
-        cycle_columns = [col for col in columns if col != 'Name']
+        # Get cycle columns (all except 'Name')
+        cycle_columns = [h[1] for h in final_headers if h[1] != 'Name']
         
         # Convert to the expected format
         people = []
-        for row in data:
-            person = {'Name': str(row['Name'])}
-            for col in cycle_columns:
-                val = row[col]
-                if isinstance(val, str):
-                    person[col] = val.upper() in ['TRUE', 'YES', '1']
-                else:
-                    person[col] = bool(val)
-            people.append(person)
+        for row in data_rows:
+            person = {}
+            for col_idx, col_name in final_headers:
+                if col_idx < len(row):
+                    val = row[col_idx]
+                    if col_name == 'Name':
+                        person['Name'] = str(val).strip()
+                    else:
+                        # Convert to boolean
+                        if isinstance(val, str):
+                            person[col_name] = val.strip().upper() in ['TRUE', 'YES', '1']
+                        else:
+                            person[col_name] = bool(val)
+            
+            # Only add if has a name
+            if person.get('Name'):
+                people.append(person)
         
         return {
             'people': people,
@@ -236,42 +289,6 @@ def auto_add_new_cycle(data):
         
         return True
     return False
-
-# ==================== FLASK API (ADD THIS SECTION) ====================
-
-flask_app = Flask(__name__)
-
-@flask_app.route('/api/get-prayer-data', methods=['GET'])
-def api_get_prayer_data():
-    """API endpoint to get prayer data"""
-    data = load_data()
-    return jsonify(data)
-
-@flask_app.route('/api/save-prayer-data', methods=['POST'])
-def api_save_prayer_data():
-    """API endpoint to save prayer data"""
-    try:
-        data = request.json
-        save_data(data)
-        return jsonify({'success': True, 'message': 'Data saved successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@flask_app.route('/mini-app')
-def serve_mini_app():
-    """Serve the mini app HTML"""
-    return send_file('mini_app.html')
-
-def run_flask():
-    """Run Flask API server"""
-    flask_app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-
-# Start Flask in a thread (ADD THIS SECTION)
-if 'flask_started' not in st.session_state:
-    st.session_state.flask_started = True
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    print("✅ Flask API started on port 5000")
 
 # ==================== BOT FUNCTIONS ====================
 
