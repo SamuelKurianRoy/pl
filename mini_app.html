@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prayer Cycle Tracker</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 12px;
+            overflow-x: hidden;
+        }
+        
+        .header {
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 22px;
+            margin-bottom: 8px;
+            color: var(--tg-theme-text-color);
+        }
+        
+        .status-bar {
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex: 1;
+            min-width: 100px;
+        }
+        
+        button:active {
+            transform: scale(0.98);
+            opacity: 0.8;
+        }
+        
+        .btn-primary {
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+        
+        .btn-success {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .btn-info {
+            background-color: #2196F3;
+            color: white;
+        }
+        
+        .btn-warning {
+            background-color: #ff9800;
+            color: white;
+        }
+        
+        .btn-small {
+            padding: 6px 10px;
+            font-size: 12px;
+            min-width: auto;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            background-color: var(--tg-theme-secondary-bg-color, #f5f5f5);
+            border-radius: 12px;
+            padding: 8px;
+            margin-bottom: 12px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            font-size: 13px;
+        }
+        
+        th, td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+            white-space: nowrap;
+        }
+        
+        th {
+            font-weight: 600;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            border-bottom: 2px solid #ccc;
+        }
+        
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        
+        input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #4caf50;
+        }
+        
+        .status-yes {
+            color: #4caf50;
+            font-weight: 600;
+        }
+        
+        .status-no {
+            color: #f44336;
+            font-weight: 600;
+        }
+        
+        .name-cell {
+            font-weight: 500;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .remove-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 16px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 400px;
+        }
+        
+        .modal-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        
+        .modal-body {
+            margin-bottom: 16px;
+        }
+        
+        .modal-footer {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--tg-theme-hint-color);
+            font-size: 16px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
+        .empty-state h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #4caf50;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🙏 Prayer Cycle Tracker</h1>
+    </div>
+    
+    <div class="status-bar" id="statusBar">
+        <div id="cycleInfo">Loading...</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button class="btn-info" onclick="uploadFile()">📁 Upload Data</button>
+        <button class="btn-primary" onclick="addPerson()">➕ Person</button>
+        <button class="btn-primary" onclick="addCycle()">➕ Cycle</button>
+        <button class="btn-success" onclick="saveData()">💾 Save</button>
+    </div>
+    
+    <div class="controls">
+        <button class="btn-warning btn-small" onclick="exportCSV()">📊 Export CSV</button>
+        <button class="btn-warning btn-small" onclick="exportExcel()">📗 Export Excel</button>
+    </div>
+    
+    <div id="loading" class="loading" style="display: none;">
+        Loading data...
+    </div>
+    
+    <div id="emptyState" class="empty-state" style="display: none;">
+        <h2>📋 No Data Yet</h2>
+        <p>Upload a CSV/Excel file or load data from the bot</p>
+        <button class="btn-primary" onclick="uploadFile()" style="margin-top: 16px;">Upload File</button>
+    </div>
+    
+    <div class="table-container" id="tableContainer">
+        <table id="prayerTable">
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+
+    <!-- Add Person Modal -->
+    <div class="modal" id="addPersonModal">
+        <div class="modal-content">
+            <div class="modal-header">Add New Person</div>
+            <div class="modal-body">
+                <input type="text" id="personNameInput" placeholder="Full Name (e.g., Abel K. George)">
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="confirmAddPerson()">Add</button>
+                <button onclick="closeModal('addPersonModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload File Modal -->
+    <div class="modal" id="uploadModal">
+        <div class="modal-content">
+            <div class="modal-header">Upload Data File</div>
+            <div class="modal-body">
+                <input type="file" id="fileInput" accept=".csv,.xlsx,.xls">
+                <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                    Supported formats: CSV, Excel (.xlsx, .xls)<br>
+                    First column: Name<br>
+                    Other columns: Cycle 1, Cycle 2, etc.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="processUploadedFile()">Upload</button>
+                <button onclick="closeModal('uploadModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        let tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+        
+        let prayerData = {
+            people: [],
+            columns: []
+        };
+        
+        // Load data from Telegram Cloud Storage or bot
+        function loadData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            
+            // Try to get data from Telegram Cloud Storage
+            if (tg.CloudStorage) {
+                tg.CloudStorage.getItem('prayer_cycles', function(error, value) {
+                    if (!error && value) {
+                        try {
+                            prayerData = JSON.parse(value);
+                            renderTable();
+                            updateStatus();
+                            document.getElementById('loading').style.display = 'none';
+                            document.getElementById('tableContainer').style.display = 'block';
+                        } catch (e) {
+                            console.error('Error parsing stored data:', e);
+                            showEmptyState();
+                        }
+                    } else {
+                        // Try to fetch from backend API
+                        fetchDataFromBackend();
+                    }
+                });
+            } else {
+                // Fallback: try backend or show empty state
+                fetchDataFromBackend();
+            }
+        }
+        
+        function fetchDataFromBackend() {
+            // This would connect to your backend API
+            // For now, show empty state
+            fetch('/api/get-prayer-data')
+                .then(response => response.json())
+                .then(data => {
+                    prayerData = data;
+                    renderTable();
+                    updateStatus();
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('tableContainer').style.display = 'block';
+                })
+                .catch(error => {
+                    console.log('No backend data available');
+                    showEmptyState();
+                });
+        }
+        
+        function showEmptyState() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'block';
+        }
+        
+        function renderTable() {
+            const tableHead = document.getElementById('tableHead');
+            const tableBody = document.getElementById('tableBody');
+            
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            
+            if (prayerData.people.length === 0) {
+                showEmptyState();
+                return;
+            }
+            
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('tableContainer').style.display = 'block';
+            
+            // Render header
+            const headerRow = document.createElement('tr');
+            const nameHeader = document.createElement('th');
+            nameHeader.textContent = 'Name';
+            nameHeader.style.minWidth = '150px';
+            headerRow.appendChild(nameHeader);
+            
+            prayerData.columns.forEach(col => {
+                const th = document.createElement('th');
+                th.textContent = col;
+                th.style.textAlign = 'center';
+                th.style.minWidth = '100px';
+                headerRow.appendChild(th);
+            });
+            
+            const actionHeader = document.createElement('th');
+            actionHeader.textContent = '🗑️';
+            actionHeader.style.textAlign = 'center';
+            actionHeader.style.width = '50px';
+            headerRow.appendChild(actionHeader);
+            
+            tableHead.appendChild(headerRow);
+            
+            // Render body
+            prayerData.people.forEach((person, personIndex) => {
+                const row = document.createElement('tr');
+                
+                const nameCell = document.createElement('td');
+                nameCell.className = 'name-cell';
+                nameCell.textContent = person.Name;
+                nameCell.title = person.Name;
+                row.appendChild(nameCell);
+                
+                prayerData.columns.forEach(col => {
+                    const cell = document.createElement('td');
+                    const container = document.createElement('div');
+                    container.className = 'checkbox-container';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = person[col] === true || person[col] === 'TRUE' || person[col] === 'true';
+                    checkbox.onchange = () => toggleValue(personIndex, col);
+                    
+                    const label = document.createElement('span');
+                    label.className = checkbox.checked ? 'status-yes' : 'status-no';
+                    label.textContent = checkbox.checked ? 'Yes' : 'No';
+                    
+                    container.appendChild(checkbox);
+                    container.appendChild(label);
+                    cell.appendChild(container);
+                    row.appendChild(cell);
+                });
+                
+                const actionCell = document.createElement('td');
+                actionCell.style.textAlign = 'center';
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-btn';
+                removeBtn.textContent = '×';
+                removeBtn.onclick = () => removePerson(personIndex);
+                actionCell.appendChild(removeBtn);
+                row.appendChild(actionCell);
+                
+                tableBody.appendChild(row);
+            });
+        }
+        
+        function updateStatus() {
+            if (prayerData.columns.length === 0 || prayerData.people.length === 0) {
+                document.getElementById('cycleInfo').innerHTML = 'No data available';
+                document.getElementById('progressFill').style.width = '0%';
+                return;
+            }
+            
+            const currentCycle = prayerData.columns[prayerData.columns.length - 1];
+            let prayedCount = 0;
+            
+            prayerData.people.forEach(person => {
+                const value = person[currentCycle];
+                if (value === true || value === 'TRUE' || value === 'true') {
+                    prayedCount++;
+                }
+            });
+            
+            const totalCount = prayerData.people.length;
+            const percentage = totalCount > 0 ? (prayedCount / totalCount * 100) : 0;
+            
+            document.getElementById('cycleInfo').innerHTML = 
+                `<strong>Current Cycle:</strong> ${currentCycle} | ` +
+                `<strong>Progress:</strong> ${prayedCount}/${totalCount} prayed`;
+            
+            document.getElementById('progressFill').style.width = percentage + '%';
+            
+            // Auto-add new cycle if complete
+            if (prayedCount === totalCount && totalCount > 0) {
+                const nextCycleNum = getNextCycleNumber();
+                const newCycle = `Cycle ${nextCycleNum}`;
+                
+                if (!prayerData.columns.includes(newCycle)) {
+                    setTimeout(() => {
+                        if (confirm(`🎉 ${currentCycle} is complete! Add ${newCycle}?`)) {
+                            prayerData.columns.push(newCycle);
+                            prayerData.people.forEach(person => {
+                                person[newCycle] = false;
+                            });
+                            renderTable();
+                            updateStatus();
+                        }
+                    }, 500);
+                }
+            }
+        }
+        
+        function getNextCycleNumber() {
+            let maxNum = 0;
+            prayerData.columns.forEach(col => {
+                if (col.startsWith('Cycle ')) {
+                    const num = parseInt(col.split(' ')[1]);
+                    if (num > maxNum) maxNum = num;
+                }
+            });
+            return maxNum + 1;
+        }
+        
+        function toggleValue(personIndex, column) {
+            const currentValue = prayerData.people[personIndex][column];
+            prayerData.people[personIndex][column] = !currentValue;
+            renderTable();
+            updateStatus();
+        }
+        
+        function addPerson() {
+            openModal('addPersonModal');
+            document.getElementById('personNameInput').value = '';
+            document.getElementById('personNameInput').focus();
+        }
+        
+        function confirmAddPerson() {
+            const name = document.getElementById('personNameInput').value.trim();
+            if (!name) {
+                alert('Please enter a name');
+                return;
+            }
+            
+            const newPerson = { Name: name };
+            prayerData.columns.forEach(col => {
+                newPerson[col] = false;
+            });
+            
+            prayerData.people.push(newPerson);
+            closeModal('addPersonModal');
+            renderTable();
+            updateStatus();
+        }
+        
+        function addCycle() {
+            const nextNum = getNextCycleNumber();
+            const newCycle = `Cycle ${nextNum}`;
+            
+            prayerData.columns.push(newCycle);
+            prayerData.people.forEach(person => {
+                person[newCycle] = false;
+            });
+            
+            renderTable();
+            updateStatus();
+        }
+        
+        function removePerson(index) {
+            if (confirm(`Remove ${prayerData.people[index].Name}?`)) {
+                prayerData.people.splice(index, 1);
+                renderTable();
+                updateStatus();
+            }
+        }
+        
+        function saveData() {
+            // Save to Telegram Cloud Storage
+            if (tg.CloudStorage) {
+                tg.CloudStorage.setItem('prayer_cycles', JSON.stringify(prayerData), function(error) {
+                    if (!error) {
+                        // Also send to bot
+                        tg.sendData(JSON.stringify(prayerData));
+                        
+                        if (tg.showPopup) {
+                            tg.showPopup({
+                                title: 'Success',
+                                message: '✅ Prayer list saved successfully!',
+                                buttons: [{type: 'ok'}]
+                            });
+                        } else {
+                            alert('✅ Prayer list saved successfully!');
+                        }
+                    } else {
+                        alert('❌ Error saving data');
+                    }
+                });
+            } else {
+                // Fallback: just send to bot
+                alert('✅ Data saved locally!');
+            }
+        }
+        
+        function uploadFile() {
+            openModal('uploadModal');
+        }
+        
+        function processUploadedFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            const fileName = file.name.toLowerCase();
+            
+            if (fileName.endsWith('.csv')) {
+                // Parse CSV
+                Papa.parse(file, {
+                    header: true,
+                    complete: function(results) {
+                        processData(results.data);
+                        closeModal('uploadModal');
+                    },
+                    error: function(error) {
+                        alert('Error parsing CSV: ' + error.message);
+                    }
+                });
+            } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                // Parse Excel
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                        processData(jsonData);
+                        closeModal('uploadModal');
+                    } catch (error) {
+                        alert('Error parsing Excel: ' + error.message);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                alert('Unsupported file format. Please use CSV or Excel.');
+            }
+        }
+        
+        function processData(data) {
+            if (!data || data.length === 0) {
+                alert('No data found in file');
+                return;
+            }
+            
+            // Extract columns (everything except Name)
+            const firstRow = data[0];
+            const columns = Object.keys(firstRow).filter(key => key !== 'Name');
+            
+            // Process people
+            const people = data.map(row => {
+                const person = { Name: row.Name };
+                columns.forEach(col => {
+                    const value = row[col];
+                    person[col] = value === true || value === 'TRUE' || value === 'true' || 
+                                  value === 1 || value === '1' || value === 'Yes' || value === 'yes';
+                });
+                return person;
+            }).filter(person => person.Name); // Remove rows without names
+            
+            prayerData = {
+                people: people,
+                columns: columns
+            };
+            
+            renderTable();
+            updateStatus();
+            alert(`✅ Loaded ${people.length} people and ${columns.length} cycles`);
+        }
+        
+        function exportCSV() {
+            if (prayerData.people.length === 0) {
+                alert('No data to export');
+                return;
+            }
+            
+            const headers = ['Name', ...prayerData.columns];
+            const rows = prayerData.people.map(person => {
+                return headers.map(header => {
+                    if (header === 'Name') return person.Name;
+                    const value = person[header];
+                    return (value === true || value === 'TRUE' || value === 'true') ? 'TRUE' : 'FALSE';
+                });
+            });
+            
+            const csv = Papa.unparse({
+                fields: headers,
+                data: rows
+            });
+            
+            downloadFile(csv, 'prayer_cycles.csv', 'text/csv');
+        }
+        
+        function exportExcel() {
+            if (prayerData.people.length === 0) {
+                alert('No data to export');
+                return;
+            }
+            
+            const headers = ['Name', ...prayerData.columns];
+            const data = prayerData.people.map(person => {
+                const row = { Name: person.Name };
+                prayerData.columns.forEach(col => {
+                    const value = person[col];
+                    row[col] = (value === true || value === 'TRUE' || value === 'true') ? 'TRUE' : 'FALSE';
+                });
+                return row;
+            });
+            
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Prayer Cycles');
+            XLSX.writeFile(wb, 'prayer_cycles.xlsx');
+        }
+        
+        function downloadFile(content, filename, contentType) {
+            const blob = new Blob([content], { type: contentType });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+        }
+        
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+        
+        // Handle Enter key in add person modal
+        document.addEventListener('DOMContentLoaded', function() {
+            const personInput = document.getElementById('personNameInput');
+            if (personInput) {
+                personInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        confirmAddPerson();
+                    }
+                });
+            }
+        });
+        
+        // Load data on startup
+        loadData();
+    </script>
+</body>
+</html>

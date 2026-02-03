@@ -1,0 +1,6 @@
+__pycache__/
+.env
+.streamlit/secrets.toml
+prayer_list_data.json
+bot_status.json
+*.log" 
