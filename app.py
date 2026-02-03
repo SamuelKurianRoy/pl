@@ -67,8 +67,8 @@ def load_excel_data(file_path_or_buffer):
         st.error(f"Error loading Excel data: {str(e)}")
         return None
 
-def load_google_sheets_data(sheet_name):
-    """Load data from Google Sheets"""
+def load_google_sheets_data(sheet_identifier):
+    """Load data from Google Sheets (accepts name, URL, or ID)"""
     try:
         # Define the scope
         scope = ['https://spreadsheets.google.com/feeds',
@@ -83,8 +83,22 @@ def load_google_sheets_data(sheet_name):
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        # Open the spreadsheet
-        sheet = client.open(sheet_name).sheet1
+        # Open the spreadsheet - handle name, URL, or ID
+        if 'docs.google.com/spreadsheets' in sheet_identifier:
+            # It's a URL - extract the ID
+            import re
+            match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheet_identifier)
+            if match:
+                sheet = client.open_by_key(match.group(1)).sheet1
+            else:
+                st.error("Invalid Google Sheets URL format")
+                return None
+        elif len(sheet_identifier) > 30 and '-' in sheet_identifier:
+            # Looks like a sheet ID (long alphanumeric with dashes)
+            sheet = client.open_by_key(sheet_identifier).sheet1
+        else:
+            # Assume it's a sheet name
+            sheet = client.open(sheet_identifier).sheet1
         
         # Get all values
         data = sheet.get_all_records()
